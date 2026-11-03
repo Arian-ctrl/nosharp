@@ -50,6 +50,46 @@ dotnah run path/to/program.nos
 - WebAssembly
 - Wasmtime
 
+## Syntax
+
+Below you will an example of No#'s syntax:
+
+```
+// Variable declarations
+auto dynamic_value = 5
+int number = 45
+float decimal = 2.5
+string message = "Hello from No#"
+bool enabled = true
+
+// Functions
+int double_number(int value) {
+    return value * 2
+}
+
+bool invert(bool value) {
+    return not value
+}
+
+// Arithmetic and function calls
+int result = double_number(number)
+print_i32(result)
+
+// For loop
+for int i = 1, 10, 1 {
+    print_i32(i)
+}
+
+// Conditional statements
+if result > 50 and not enabled == false {
+    print_i32(1)
+} elseif result == 90 {
+    print_i32(2)
+} else {
+    print_i32(3)
+}
+```
+
 ## Project Status
 
 No# is an experimental language under active development.
