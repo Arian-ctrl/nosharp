@@ -477,6 +477,7 @@ pub fn parse_code(tokens: &[Token], source: &str) -> Result<Vec<Stmt>, Vec<Parse
                         &message,
                         None,
                     ),
+					
                     message,
                     start: error.span().start,
                     end: error.span().end,

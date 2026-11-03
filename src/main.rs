@@ -1,9 +1,11 @@
 // This file is part of the No# (Nosharp) programming language and is licensed under MIT License; see LICENSE.txt for details
 
 mod commands;
-mod eval;
+mod typechecker;
 mod syntax;
+mod wasm;
 
+use wasm::WasmCompiler;
 use std::collections::HashMap;
 
 use commands::lower_program;
@@ -28,7 +30,9 @@ struct CliDiagnostic {
 }
 
 fn main() {
-    let source_code = std::fs::read_to_string("..\\..\\Nosharp\\main.no").expect("Failed to read file");
+    let args: Vec<String> = std::env::args().collect();
+    let file_path = args.get(1).map(|s| s.as_str()).unwrap_or("test.nos");
+    let source_code = std::fs::read_to_string(file_path).unwrap_or_else(|_| panic!("Failed to read file: {file_path}"));
 
     let mut lex_errors = Vec::new();
     let tokens: Vec<Token> = Token::lexer(&source_code)
@@ -51,10 +55,10 @@ fn main() {
                         Some(help),
                     ),
                 });
+
                 None
             }
-        })
-        .collect();
+        }).collect();
 
     if !lex_errors.is_empty() {
         print_result(CliResult {
@@ -62,6 +66,7 @@ fn main() {
             commands: None,
             errors: lex_errors,
         });
+
         return;
     }
 
@@ -79,15 +84,15 @@ fn main() {
                         end: error.end,
                         help: error.help,
                         rendered: error.rendered,
-                    })
-                    .collect(),
+                    }).collect(),
             });
+
             return;
         }
     };
 
     let commands = lower_program(&ast);
-    let errors = eval::check_program(&ast, HashMap::new())
+    let errors = typechecker::check_program(&ast, HashMap::new())
         .into_iter()
         .map(|error| CliDiagnostic {
             message: error.message,
@@ -95,8 +100,13 @@ fn main() {
             end: error.end,
             help: error.help,
             rendered: error.rendered,
-        })
-        .collect::<Vec<_>>();
+        }).collect::<Vec<_>>();
+
+    if errors.is_empty() {
+        let wasm_bytes = WasmCompiler::compile_program(&commands);
+        std::fs::write("output.wasm", &wasm_bytes).expect("Failed to write output.wasm");
+        println!("Successfully generated output.wasm! ({} bytes)", wasm_bytes.len());
+    }
 
     print_result(CliResult {
         success: errors.is_empty(),

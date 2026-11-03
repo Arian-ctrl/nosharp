@@ -1,17 +1,19 @@
 // This file is part of the No# (Nosharp) programming language and is licensed under MIT License; see LICENSE.txt for details
 
-use logos::Logos;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use logos::Logos;
+use serde::Serialize;
 
 mod commands;
-mod eval;
+mod typechecker;
 mod syntax;
+mod wasm;
 
-use commands::{Command, lower_program};
+use commands::lower_program;
 use syntax::{Token, parse_code, render_diagnostic};
+use wasm::WasmCompiler;
 
 #[derive(Serialize)]
 pub struct Diagnostic {
@@ -22,81 +24,60 @@ pub struct Diagnostic {
     pub rendered: Option<String>,
 }
 
-#[derive(Serialize)]
-pub struct ParseResult {
+#[repr(C)]
+pub struct WasmCompileResult {
     pub success: bool,
-    pub commands: Option<Vec<Command>>,
-    pub errors: Vec<Diagnostic>,
+    pub wasm_ptr: *const u8,
+    pub wasm_len: usize,
+    pub errors_json: *const c_char,
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn nosharp_parse(
-    source_ptr: *const c_char,
-    globals_c_char: *const c_char,
-) -> *const c_char {
+pub unsafe extern "C" fn nosharp_compile_to_wasm(source_ptr: *const c_char, globals_ptr: *const c_char,) -> WasmCompileResult {
     if source_ptr.is_null() {
-        return std::ptr::null();
+        return WasmCompileResult {
+            success: false,
+            wasm_ptr: std::ptr::null(),
+            wasm_len: 0,
+            errors_json: CString::new("[{\"message\":\"Null source pointer\"}]").unwrap().into_raw(),
+        };
     }
 
     let c_str = unsafe { CStr::from_ptr(source_ptr) };
     let code = match c_str.to_str() {
         Ok(s) => s,
         Err(_) => {
-            let err_res = ParseResult {
+            return WasmCompileResult {
                 success: false,
-                commands: None,
-                errors: vec![Diagnostic {
-                    message: "Invalid UTF-8 string".into(),
-                    start: 0,
-                    end: 0,
-                    help: None,
-                    rendered: None,
-                }],
+                wasm_ptr: std::ptr::null(),
+                wasm_len: 0,
+                errors_json: CString::new("[{\"message\":\"Invalid UTF-8 string\"}]").unwrap().into_raw(),
             };
-
-            return result_to_c_string(&err_res);
         }
     };
 
-    let globals_str = if globals_c_char.is_null() {
-        "{}"
+	let globals: HashMap<String, serde_json::Value> = if globals_ptr.is_null() {
+        HashMap::new()
     } else {
-        match unsafe { CStr::from_ptr(globals_c_char) }.to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                let err_res = ParseResult {
+        let globals_str = unsafe { CStr::from_ptr(globals_ptr) };
+
+        match globals_str.to_str()
+            .ok()
+            .and_then(|s| serde_json::from_str(s).ok())
+        {
+            Some(globals) => globals,
+            None => {
+                let json = CString::new(
+                    r#"[{"message":"Invalid globals JSON"}]"#
+                ).unwrap();
+
+                return WasmCompileResult {
                     success: false,
-                    commands: None,
-                    errors: vec![Diagnostic {
-                        message: "Invalid UTF-8 globals JSON".into(),
-                        start: 0,
-                        end: 0,
-                        help: None,
-                        rendered: None,
-                    }],
+                    wasm_ptr: std::ptr::null(),
+                    wasm_len: 0,
+                    errors_json: json.into_raw(),
                 };
-
-                return result_to_c_string(&err_res);
             }
-        }
-    };
-
-    let globals: HashMap<String, serde_json::Value> = match serde_json::from_str(globals_str) {
-        Ok(globals) => globals,
-        Err(err) => {
-            let err_res = ParseResult {
-                success: false,
-                commands: None,
-                errors: vec![Diagnostic {
-                    message: format!("Invalid globals JSON: {err}"),
-                    start: 0,
-                    end: 0,
-                    help: Some("Expected an object of global function metadata.".to_string()),
-                    rendered: None,
-                }],
-            };
-
-            return result_to_c_string(&err_res);
         }
     };
 
@@ -123,23 +104,22 @@ pub unsafe extern "C" fn nosharp_parse(
                 });
                 None
             }
-        })
-        .collect();
+        }).collect();
 
     if !lex_errors.is_empty() {
-        let result = ParseResult {
+        let json = serde_json::to_string(&lex_errors).unwrap_or_default();
+        return WasmCompileResult {
             success: false,
-            commands: None,
-            errors: lex_errors,
+            wasm_ptr: std::ptr::null(),
+            wasm_len: 0,
+            errors_json: CString::new(json).unwrap().into_raw(),
         };
-
-        return result_to_c_string(&result);
     }
 
     let ast = match parse_code(&tokens, code) {
         Ok(ast) => ast,
         Err(errors) => {
-            let diag_errors = errors
+            let diag_errors: Vec<_> = errors
                 .into_iter()
                 .map(|e| Diagnostic {
                     message: e.message,
@@ -147,21 +127,19 @@ pub unsafe extern "C" fn nosharp_parse(
                     end: e.end,
                     help: e.help,
                     rendered: e.rendered,
-                })
-                .collect();
+                }).collect();
 
-            let result = ParseResult {
+            let json = serde_json::to_string(&diag_errors).unwrap_or_default();
+            return WasmCompileResult {
                 success: false,
-                commands: None,
-                errors: diag_errors,
+                wasm_ptr: std::ptr::null(),
+                wasm_len: 0,
+                errors_json: CString::new(json).unwrap().into_raw(),
             };
-
-            return result_to_c_string(&result);
         }
     };
 
-    let commands = lower_program(&ast);
-    let check_errors = eval::check_program(&ast, globals)
+    let check_errors = typechecker::check_program(&ast, globals)
         .into_iter()
         .map(|error| Diagnostic {
             message: error.message,
@@ -169,45 +147,43 @@ pub unsafe extern "C" fn nosharp_parse(
             end: error.end,
             help: error.help,
             rendered: error.rendered,
-        })
-        .collect::<Vec<_>>();
+        }).collect::<Vec<_>>();
 
     if !check_errors.is_empty() {
-        let result = ParseResult {
+        let json = serde_json::to_string(&check_errors).unwrap_or_default();
+        return WasmCompileResult {
             success: false,
-            commands: Some(commands),
-            errors: check_errors,
+            wasm_ptr: std::ptr::null(),
+            wasm_len: 0,
+            errors_json: CString::new(json).unwrap().into_raw(),
         };
-
-        return result_to_c_string(&result);
     }
 
-    let result = ParseResult {
-        success: true,
-        commands: Some(commands),
-        errors: vec![],
-    };
+    let commands = lower_program(&ast);
+    let wasm_bytes = WasmCompiler::compile_program(&commands);
+    let wasm_len = wasm_bytes.len();
+    let wasm_ptr = wasm_bytes.as_ptr();
+    std::mem::forget(wasm_bytes); // Keep memory alive for C# to read
 
-    result_to_c_string(&result)
+    WasmCompileResult {
+        success: true,
+        wasm_ptr,
+        wasm_len,
+        errors_json: std::ptr::null(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nosharp_free_wasm(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        drop(unsafe { Vec::from_raw_parts(ptr, len, len) });
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nosharp_free_string(s: *mut c_char) {
     if !s.is_null() {
-        unsafe {
-            let _ = CString::from_raw(s);
-        }
+        drop(unsafe { CString::from_raw(s) });
     }
 }
 
-fn result_to_c_string(result: &ParseResult) -> *const c_char {
-    let json = match serde_json::to_string(result) {
-        Ok(json) => json,
-        Err(err) => format!(
-            "{{\"success\":false,\"commands\":null,\"errors\":[{{\"message\":\"failed to serialize result: {}\",\"start\":0,\"end\":0,\"help\":null,\"rendered\":null}}]}}",
-            err
-        ),
-    };
-
-    CString::new(json).unwrap().into_raw()
-}

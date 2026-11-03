@@ -16,25 +16,29 @@ pub enum Value {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
-pub enum CsExpr {
+pub enum WasmExpr {
     Literal {
         value: Value,
     },
+	
     Variable {
         name: String,
     },
+
     BinaryOp {
         op: String,
-        left: Box<CsExpr>,
-        right: Box<CsExpr>,
+        left: Box<WasmExpr>,
+        right: Box<WasmExpr>,
     },
+
     UnaryOp {
         op: String,
-        operand: Box<CsExpr>,
+        operand: Box<WasmExpr>,
     },
+
     Call {
         name: String,
-        args: Vec<CsExpr>,
+        args: Vec<WasmExpr>,
     },
 }
 
@@ -44,65 +48,78 @@ pub enum Command {
     SetVar {
         name: String,
         var_type: Option<String>,
-        value: CsExpr,
+        value: WasmExpr,
     },
+
     AssignVar {
         name: String,
-        value: CsExpr,
+        value: WasmExpr,
     },
+
     CallFunction {
         name: String,
-        args: Vec<CsExpr>,
+        args: Vec<WasmExpr>,
     },
+
     DefineFunction {
         name: String,
         return_type: String,
         params: Vec<(String, String)>, // (type, name)
         body: Vec<Command>,
     },
+
     If {
-        condition: CsExpr,
+        condition: WasmExpr,
         then_block: Vec<Command>,
         else_block: Option<Vec<Command>>,
     },
+
     For {
         var_type: String,
         name: String,
-        start: CsExpr,
-        end: CsExpr,
-        step: CsExpr,
+        start: WasmExpr,
+        end: WasmExpr,
+        step: WasmExpr,
         body: Vec<Command>,
     },
+
     Return {
-        value: Option<CsExpr>,
+        value: Option<WasmExpr>,
     },
+
     ExprStatement {
-        value: CsExpr,
+        value: WasmExpr,
     },
 }
 
-pub fn lower_expr(expr: &Expr) -> CsExpr {
+pub fn lower_expr(expr: &Expr) -> WasmExpr {
     match expr {
-        Expr::Int(n) => CsExpr::Literal {
+        Expr::Int(n) => WasmExpr::Literal {
             value: Value::Int(*n),
         },
-        Expr::Float(f) => CsExpr::Literal {
+
+        Expr::Float(f) => WasmExpr::Literal {
             value: Value::Float(*f),
         },
-        Expr::String(s) => CsExpr::Literal {
+
+        Expr::String(s) => WasmExpr::Literal {
             value: Value::String(s.clone()),
         },
-        Expr::Bool(b) => CsExpr::Literal {
+
+        Expr::Bool(b) => WasmExpr::Literal {
             value: Value::Bool(*b),
         },
-        Expr::Var(name) => CsExpr::Variable { name: name.clone() },
 
-        Expr::Unary { op, operand } => CsExpr::UnaryOp {
+        Expr::Var(name) => WasmExpr::Variable {
+			name: name.clone()
+		},
+
+        Expr::Unary { op, operand } => WasmExpr::UnaryOp {
             op: op_to_string(op),
             operand: Box::new(lower_expr(operand)),
         },
 
-        Expr::Binary { op, left, right } => CsExpr::BinaryOp {
+        Expr::Binary { op, left, right } => WasmExpr::BinaryOp {
             op: op_to_string(op),
             left: Box::new(lower_expr(left)),
             right: Box::new(lower_expr(right)),
@@ -113,7 +130,8 @@ pub fn lower_expr(expr: &Expr) -> CsExpr {
                 Expr::Var(n) => n.clone(),
                 _ => "unknown".into(),
             };
-            CsExpr::Call {
+
+            WasmExpr::Call {
                 name,
                 args: args.iter().map(lower_expr).collect(),
             }
@@ -144,6 +162,7 @@ pub fn lower_stmt(stmt: &Stmt) -> Command {
                     Expr::Var(n) => n.clone(),
                     _ => "unknown".into(),
                 };
+
                 Command::CallFunction {
                     name,
                     args: args.iter().map(lower_expr).collect(),
@@ -214,7 +233,7 @@ fn op_to_string(op: &Op) -> String {
         Op::And => "and",
         Op::Or => "or",
         Op::Not => "not",
-        Op::NotEqual => "!=",
+        Op::NotEqual => "~=",
         Op::Concat => "..",
     }
     .into()

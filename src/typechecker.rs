@@ -1,9 +1,7 @@
 // This file is part of the No# (Nosharp) programming language and is licensed under MIT License; see LICENSE.txt for details
 
 use std::collections::HashMap;
-
 use serde::Deserialize;
-
 use crate::syntax::{Expr, Op, Stmt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,9 +103,7 @@ struct GlobalFunction {
 impl Checker {
     pub fn new() -> Self {
         Self {
-            scopes: vec![Scope {
-                vars: HashMap::new(),
-            }],
+            scopes: vec![Scope {vars: HashMap::new()}],
             functions: HashMap::new(),
             diagnostics: Vec::new(),
             current_return_type: None,
@@ -124,9 +120,8 @@ impl Checker {
                         .enumerate()
                         .map(|(index, ty)| (TypeInfo::from_name(&ty), format!("arg{index}")))
                         .collect();
-                    let return_type =
-                        TypeInfo::from_name(global.returns.as_deref().unwrap_or("void"));
 
+                    let return_type = TypeInfo::from_name(global.returns.as_deref().unwrap_or("void"));
                     self.functions.insert(
                         name,
                         FunctionSig {
@@ -137,10 +132,7 @@ impl Checker {
                 }
                 Err(err) => self.error(
                     format!("global `{name}` has invalid metadata: {err}"),
-                    Some(
-                        "Expected JSON like { \"parameters\": [\"int\"], \"returns\": \"void\" }"
-                            .to_string(),
-                    ),
+                    Some("Expected JSON like { \"parameters\": [\"int\"], \"returns\": \"void\" }".to_string()),
                 ),
             }
         }
@@ -163,8 +155,7 @@ impl Checker {
                 name,
                 params,
                 ..
-            } = stmt
-            {
+            } = stmt {
                 if self.functions.contains_key(name) {
                     self.error(format!("function `{name}` is already defined"), None);
                 }
@@ -205,12 +196,14 @@ impl Checker {
                             declared.name(),
                             actual.name()
                         ),
+
                         Some("Change the variable type or assign a matching value.".to_string()),
                     );
                 }
 
                 self.define_var(name.clone(), declared);
             }
+
             Stmt::Assign { name, value } => {
                 let actual = self.check_expr(value);
 
@@ -221,8 +214,10 @@ impl Checker {
                             expected.name(),
                             actual.name()
                         ),
+
                         Some("Assignments must keep the same type.".to_string()),
                     ),
+					
                     Some(_) => {}
                     None => self.error(
                         format!("you can't change `{name}` because it does not exist yet"),
@@ -232,6 +227,7 @@ impl Checker {
                     ),
                 }
             }
+
             Stmt::Function {
                 return_type,
                 params,
@@ -254,6 +250,7 @@ impl Checker {
                 self.current_return_type = previous_return;
                 self.pop_scope();
             }
+
             Stmt::If {
                 condition,
                 then_block,
@@ -273,6 +270,7 @@ impl Checker {
                     self.check_block(else_block);
                 }
             }
+
             Stmt::For {
                 var_type,
                 name,
@@ -296,9 +294,11 @@ impl Checker {
                 self.check_block(body);
                 self.pop_scope();
             }
+
             Stmt::Expr(expr) => {
                 self.check_expr(expr);
             }
+
             Stmt::Return(expr) => {
                 let actual = expr
                     .as_ref()
@@ -312,11 +312,13 @@ impl Checker {
                             expected.name(),
                             actual.name()
                         ),
+
                         Some(
                             "Change the function return type or return a matching value."
                                 .to_string(),
                         ),
                     ),
+
                     Some(_) => {}
                     None => self.error(
                         "`return` can only be used inside a function".to_string(),
@@ -332,6 +334,7 @@ impl Checker {
         for stmt in statements {
             self.check_stmt(stmt);
         }
+
         self.pop_scope();
     }
 
@@ -348,9 +351,10 @@ impl Checker {
                         format!("couldn't find a variable or function named `{name}`"),
                         Some(format!("Define `{name}` before using it.")),
                     );
+
                     None
-                })
-                .unwrap_or(TypeInfo::Unknown),
+                }).unwrap_or(TypeInfo::Unknown),
+
             Expr::Call { callee, args } => self.check_call(callee, args),
             Expr::Unary { op, operand } => {
                 let operand_type = self.check_expr(operand);
@@ -365,18 +369,22 @@ impl Checker {
                         );
                         TypeInfo::Unknown
                     }
+
                     (_, other) => {
                         self.error(
                             format!("unsupported unary operator for `{}`", other.name()),
                             None,
                         );
+
                         TypeInfo::Unknown
                     }
                 }
             }
+
             Expr::Binary { op, left, right } => {
                 let left_type = self.check_expr(left);
                 let right_type = self.check_expr(right);
+
                 self.check_binary(op, left_type, right_type)
             }
         }
@@ -388,12 +396,12 @@ impl Checker {
             _ => {
                 self.check_expr(callee);
                 self.error("only named functions can be called".to_string(), None);
+
                 return TypeInfo::Unknown;
             }
         };
 
         let arg_types: Vec<TypeInfo> = args.iter().map(|arg| self.check_expr(arg)).collect();
-
         match self.functions.get(name).cloned() {
             Some(function) => {
                 if arg_types.len() != function.params.len() {
@@ -403,15 +411,12 @@ impl Checker {
                             function.params.len(),
                             arg_types.len()
                         ),
-                        Some(
-                            "Pass the exact number of arguments the function declares.".to_string(),
-                        ),
+                        
+						Some("Pass the exact number of arguments the function declares.".to_string()),
                     );
                 }
 
-                for (index, (actual, (expected, _))) in
-                    arg_types.iter().zip(function.params.iter()).enumerate()
-                {
+                for (index, (actual, (expected, _))) in arg_types.iter().zip(function.params.iter()).enumerate() {
                     if !expected.matches(actual) {
                         self.error(
                             format!(
@@ -420,6 +425,7 @@ impl Checker {
                                 expected.name(),
                                 actual.name()
                             ),
+
                             None,
                         );
                     }
@@ -427,11 +433,13 @@ impl Checker {
 
                 function.return_type
             }
+
             None => {
                 self.error(
                     format!("couldn't find a function named `{name}`"),
                     Some("Declare the function or pass it in the globals JSON.".to_string()),
                 );
+
                 TypeInfo::Unknown
             }
         }
@@ -450,13 +458,14 @@ impl Checker {
                     TypeInfo::Int
                 }
             }
+			
             Op::Concat if left == TypeInfo::String && right == TypeInfo::String => TypeInfo::String,
             Op::Equal | Op::NotEqual if left.matches(&right) => TypeInfo::Bool,
             Op::LessThan | Op::MoreThan | Op::LessOrEqual | Op::MoreOrEqual
-                if left.is_number() && right.is_number() =>
-            {
+                if left.is_number() && right.is_number() => {
                 TypeInfo::Bool
             }
+
             Op::And | Op::Or if left == TypeInfo::Bool && right == TypeInfo::Bool => TypeInfo::Bool,
             _ => {
                 self.error(
@@ -466,8 +475,10 @@ impl Checker {
                         left.name(),
                         right.name()
                     ),
+
                     Some("Use compatible types for this operator.".to_string()),
                 );
+
                 TypeInfo::Unknown
             }
         }
