@@ -11,6 +11,7 @@ obj/
 *.user
 *.suo
 .vs/
+profile.out
 
 # No# and Wasm testing
 *.nos
