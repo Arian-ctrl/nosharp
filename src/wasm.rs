@@ -37,7 +37,7 @@ impl WasmCompiler {
 		
         types.ty().function(vec![], vec![]); // 0: main
         types.ty().function([ValType::I32], []); // 1: print_i32
-        types.ty().function([ValType::I32, ValType::I32], []); // 2: print_str
+        types.ty().function([ValType::I32], []); // 2: print_str (takes null-terminated pointer)
 
         // Imports
         let mut imports = ImportSection::new();
@@ -60,6 +60,7 @@ impl WasmCompiler {
 
         let mut exports = ExportSection::new();
         exports.export("main", ExportKind::Func, 2);
+        exports.export("memory", ExportKind::Memory, 0);
 
         let mut code = CodeSection::new();
         let mut main_func = Function::new([(100, ValType::I32), (100, ValType::F32)]);
@@ -302,6 +303,16 @@ impl WasmCompiler {
             }
 
             WasmExpr::BinaryOp { op, left, right } => {
+                // If it's compile-time string concatenation
+                if op == ".." {
+                    if let (WasmExpr::Literal { value: Value::String(s1) }, WasmExpr::Literal { value: Value::String(s2) }) = (&**left, &**right) {
+                        let combined = format!("{s1}{s2}");
+                        let (offset, _) = self.alloc_string_literal(&combined);
+                        func.instruction(&Instruction::I32Const(offset as i32));
+                        return Some(ValType::I32);
+                    }
+                }
+
                 let left_type = self.compile_expr(left, func);
                 let right_type = self.compile_expr(right, func);
 
@@ -312,6 +323,30 @@ impl WasmCompiler {
                 }
 
                 match (left_type, op_str) {
+                    (Some(ValType::I32), "==") => {
+                        func.instruction(&Instruction::I32Eq);
+                    }
+
+                    (Some(ValType::I32), "!=") => {
+                        func.instruction(&Instruction::I32Ne);
+                    }
+
+                    (Some(ValType::I32), "<") => {
+                        func.instruction(&Instruction::I32LtS);
+                    }
+
+                    (Some(ValType::I32), "<=") => {
+                        func.instruction(&Instruction::I32LeS);
+                    }
+
+                    (Some(ValType::I32), ">") => {
+                        func.instruction(&Instruction::I32GtS);
+                    }
+
+                    (Some(ValType::I32), ">=") => {
+                        func.instruction(&Instruction::I32GeS);
+                    }
+
                     (Some(ValType::I32), "+") => {
                         func.instruction(&Instruction::I32Add);
                     }

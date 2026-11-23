@@ -11,3 +11,7 @@ obj/
 *.user
 *.suo
 .vs/
+
+# No# and Wasm testing
+*.nos
+*.wasm

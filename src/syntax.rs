@@ -46,7 +46,7 @@ pub fn render_diagnostic(
 }
 
 #[derive(Logos, Debug, PartialEq, Clone)]
-#[logos(skip r"[ \t\n\f]+")]
+#[logos(skip r"[ \t\r\n\f]+")]
 #[logos(skip(r"//[^\r\n]*", allow_greedy = true))]
 pub enum Token {
     #[token("string")]
@@ -451,7 +451,57 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], Vec<Stmt>, extra::Err<Rich<'
     .collect()
 }
 
-pub fn parse_code(tokens: &[Token], source: &str) -> Result<Vec<Stmt>, Vec<ParseDiagnostic>> {
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::StringType => write!(f, "`string`"),
+            Token::IntType => write!(f, "`int`"),
+            Token::FloatType => write!(f, "`float`"),
+            Token::BoolType => write!(f, "`bool`"),
+            Token::VoidType => write!(f, "`void`"),
+            Token::True => write!(f, "`true`"),
+            Token::False => write!(f, "`false`"),
+            Token::Auto => write!(f, "`auto`"),
+            Token::If => write!(f, "`if`"),
+            Token::Else => write!(f, "`else`"),
+            Token::Elseif => write!(f, "`elseif`"),
+            Token::And => write!(f, "`and`"),
+            Token::Or => write!(f, "`or`"),
+            Token::Not => write!(f, "`not`"),
+            Token::Return => write!(f, "`return`"),
+            Token::For => write!(f, "`for`"),
+            Token::Assign => write!(f, "`=`"),
+            Token::Plus => write!(f, "`+`"),
+            Token::Minus => write!(f, "`-`"),
+            Token::Star => write!(f, "`*`"),
+            Token::Slash => write!(f, "`/`"),
+            Token::Equal => write!(f, "`==`"),
+            Token::NotEqual => write!(f, "`!=`"),
+            Token::MoreOrEqual => write!(f, "`>=`"),
+            Token::LessOrEqual => write!(f, "`<=`"),
+            Token::MoreThan => write!(f, "`>`"),
+            Token::LessThan => write!(f, "`<`"),
+            Token::FatArrow => write!(f, "`=>`"),
+            Token::ThinArrow => write!(f, "`->`"),
+            Token::LBrace => write!(f, "`{}`", "{"),
+            Token::RBrace => write!(f, "`{}`", "}"),
+            Token::LParen => write!(f, "`(`"),
+            Token::RParen => write!(f, "`)`"),
+            Token::Comma => write!(f, "`,`"),
+            Token::Concat => write!(f, "`..`"),
+            Token::Ident(s) => write!(f, "identifier `{s}`"),
+            Token::Float(fl) => write!(f, "float `{fl}`"),
+            Token::Int(i) => write!(f, "int `{i}`"),
+            Token::String(s) => write!(f, "string \"{s}\""),
+        }
+    }
+}
+
+pub fn parse_code(
+    tokens: &[Token],
+    spans: &[std::ops::Range<usize>],
+    source: &str,
+) -> Result<Vec<Stmt>, Vec<ParseDiagnostic>> {
     use chumsky::Parser;
 
     match parser().parse(tokens).into_result() {
@@ -461,27 +511,76 @@ pub fn parse_code(tokens: &[Token], source: &str) -> Result<Vec<Stmt>, Vec<Parse
             let mut diagnostics = Vec::new();
 
             for error in errors {
-                let span = error.span().into_range();
+                let token_range = error.span().into_range();
+                let (byte_start, byte_end) = if token_range.start < spans.len() {
+                    let s = spans[token_range.start].start;
+                    let e = if token_range.end <= spans.len() && token_range.end > 0 {
+                        spans[token_range.end - 1].end
+                    } else {
+                        spans.last().map(|r| r.end).unwrap_or(source.len())
+                    };
+                    (s, e)
+                } else {
+                    let end = spans.last().map(|r| r.end).unwrap_or(source.len());
+                    (end.saturating_sub(1), end)
+                };
 
-                let message = match error.found() {
-                    Some(token) => format!("unexpected {:?}", token),
-                    None => "unexpected end of file".to_string(),
+                let mut expected_tokens: Vec<String> = error.expected()
+                    .map(|pattern| match pattern {
+                        chumsky::error::RichPattern::Token(tok) => tok.to_string(),
+                        chumsky::error::RichPattern::Label(l) => (*l).to_string(),
+                        chumsky::error::RichPattern::EndOfInput => "end of file".to_string(),
+                        _ => format!("{:?}", pattern),
+                    }).collect();
+
+                expected_tokens.sort();
+                expected_tokens.dedup();
+
+                let found_desc = match error.found() {
+                    Some(token) => token.to_string(),
+                    None => "end of file".to_string(),
+                };
+
+                let message: String = if expected_tokens.contains(&"`}`".to_string()) {
+                    format!("expected `}}` to close block, but found {found_desc}") as String
+                } else if expected_tokens.contains(&"`)`".to_string()) {
+                    format!("expected `)` to close parentheses, but found {found_desc}") as String
+                } else if expected_tokens.contains(&"`]`".to_string()) {
+                    format!("expected `]` to close bracket, but found {found_desc}") as String
+                } else if !expected_tokens.is_empty() {
+                    if expected_tokens.len() <= 3 {
+                        let exp = expected_tokens.join(" or ");
+                        format!("expected {exp}, but found {found_desc}") as String
+                    } else {
+                        let exp = expected_tokens.join(", ");
+                        format!("expected one of {exp}, but found {found_desc}") as String
+                    }
+                } else {
+                    format!("unexpected {found_desc}") as String
+                };
+
+                let help = if expected_tokens.contains(&"`}`".to_string()) {
+                    Some("Did you forget to close a block with `}`?".to_string())
+                } else if expected_tokens.contains(&"`)`".to_string()) {
+                    Some("Did you forget to close parentheses `)`?".to_string())
+                } else {
+                    None
                 };
 
                 diagnostics.push(ParseDiagnostic {
                     rendered: render_diagnostic(
                         source,
                         "syntax error",
-                        span.start,
-                        span.end,
+                        byte_start,
+                        byte_end,
                         &message,
-                        None,
+                        help.as_deref(),
                     ),
-					
+
                     message,
-                    start: error.span().start,
-                    end: error.span().end,
-                    help: None,
+                    start: byte_start,
+                    end: byte_end,
+                    help,
                 });
             }
 

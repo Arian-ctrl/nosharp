@@ -35,10 +35,15 @@ fn main() {
     let source_code = std::fs::read_to_string(file_path).unwrap_or_else(|_| panic!("Failed to read file: {file_path}"));
 
     let mut lex_errors = Vec::new();
-    let tokens: Vec<Token> = Token::lexer(&source_code)
-        .spanned()
-        .filter_map(|(res, span)| match res {
-            Ok(token) => Some(token),
+    let mut tokens = Vec::new();
+    let mut spans = Vec::new();
+
+    for (res, span) in Token::lexer(&source_code).spanned() {
+        match res {
+            Ok(token) => {
+                tokens.push(token);
+                spans.push(span);
+            }
             Err(_) => {
                 let help = "Remove or replace this character.";
                 lex_errors.push(CliDiagnostic {
@@ -55,10 +60,9 @@ fn main() {
                         Some(help),
                     ),
                 });
-
-                None
             }
-        }).collect();
+        }
+    }
 
     if !lex_errors.is_empty() {
         print_result(CliResult {
@@ -70,7 +74,7 @@ fn main() {
         return;
     }
 
-    let ast = match parse_code(&tokens, &source_code) {
+    let ast = match parse_code(&tokens, &spans, &source_code) {
         Ok(ast) => ast,
         Err(errors) => {
             print_result(CliResult {

@@ -82,10 +82,15 @@ pub unsafe extern "C" fn nosharp_compile_to_wasm(source_ptr: *const c_char, glob
     };
 
     let mut lex_errors = Vec::new();
-    let tokens: Vec<Token> = Token::lexer(code)
-        .spanned()
-        .filter_map(|(res, span)| match res {
-            Ok(token) => Some(token),
+    let mut tokens = Vec::new();
+    let mut spans = Vec::new();
+
+    for (res, span) in Token::lexer(code).spanned() {
+        match res {
+            Ok(token) => {
+                tokens.push(token);
+                spans.push(span);
+            }
             Err(_) => {
                 let help = "Remove or replace this character.";
                 lex_errors.push(Diagnostic {
@@ -102,9 +107,9 @@ pub unsafe extern "C" fn nosharp_compile_to_wasm(source_ptr: *const c_char, glob
                         Some(help),
                     ),
                 });
-                None
             }
-        }).collect();
+        }
+    }
 
     if !lex_errors.is_empty() {
         let json = serde_json::to_string(&lex_errors).unwrap_or_default();
@@ -116,7 +121,7 @@ pub unsafe extern "C" fn nosharp_compile_to_wasm(source_ptr: *const c_char, glob
         };
     }
 
-    let ast = match parse_code(&tokens, code) {
+    let ast = match parse_code(&tokens, &spans, code) {
         Ok(ast) => ast,
         Err(errors) => {
             let diag_errors: Vec<_> = errors
