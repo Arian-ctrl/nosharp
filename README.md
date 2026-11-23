@@ -52,7 +52,7 @@ dotnah run path/to/program.nos
 
 ## Syntax
 
-Below you will an example of No#'s syntax:
+Below you will see an example of No#'s syntax:
 
 ```
 // Variable declarations
