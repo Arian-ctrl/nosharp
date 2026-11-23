@@ -1,4 +1,0 @@
-29698 ./b.lua,benchmark_strings,15;./b.lua,,1
-519627 [C],gsub,;./b.lua,benchmark_strings,15;./b.lua,,1
-70567 ./b.lua,benchmark_math,5;./b.lua,,1
-700 ./b.lua,,1
